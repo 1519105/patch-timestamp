@@ -103,7 +103,7 @@ ANCHOR_IMPORT_MAPPED  = "from picamera2 import"
 ANCHOR_TIMESTAMP_FUNC = "# ── Hlavní funkce ──"   # fallback — viz logika níže
 
 # Callback vložit za "cam.start()"
-ANCHOR_CALLBACK       = "if not isUsb:"
+ANCHOR_CALLBACK       = "cam.start(show_preview=False)"
 
 # ── Pomocné funkce ────────────────────────────────────────────────────────────
 
@@ -186,13 +186,26 @@ def patch(path: Path):
         ok2, lines = insert_after_first(lines, IMPORT_CV2, [IMPORT_MAPPED + "\n"])
         changed = changed or ok2
 
-    # 3. Vložit funkci apply_timestamp před první "def " po importech
-    #    (= před první definici funkce v souboru)
-    ok, lines = insert_before_first(lines, "\ndef ", [TIMESTAMP_CODE + "\n"])
-    if ok:
-        print("  + apply_timestamp funkce přidána")
-        changed = True
-    else:
+    # 3. Vložit funkci apply_timestamp před první třídu v souboru
+    #    Hledáme "class " na začátku řádku (funguje i pro \r\n soubory)
+    inserted_func = False
+    for i, l in enumerate(lines):
+        if l.lstrip("\r\n").startswith("class "):
+            lines = lines[:i] + [TIMESTAMP_CODE + "\n"] + lines[i:]
+            print("  + apply_timestamp funkce přidána")
+            inserted_func = True
+            changed = True
+            break
+    if not inserted_func:
+        # fallback: před první def na začátku řádku
+        for i, l in enumerate(lines):
+            if l.lstrip("\r\n").startswith("def "):
+                lines = lines[:i] + [TIMESTAMP_CODE + "\n"] + lines[i:]
+                print("  + apply_timestamp funkce přidána (fallback)")
+                inserted_func = True
+                changed = True
+                break
+    if not inserted_func:
         print("  ! Funkce — kotva nenalezena")
 
     # 4. Registrovat callback: vložit za "if not isUsb:"
@@ -200,15 +213,16 @@ def patch(path: Path):
     inserted_callback = False
     for i, l in enumerate(lines):
         if ANCHOR_CALLBACK in l and "cam.pre_callback" not in l:
+            # Vložit PŘED cam.start() se stejným odsazením
             indent = len(l) - len(l.lstrip())
-            cb_line = " " * (indent + 4) + CALLBACK_LINE.strip() + "\n"
-            lines = lines[:i+1] + [cb_line] + lines[i+1:]
-            print("  + cam.pre_callback = apply_timestamp registrován")
+            cb_line = " " * indent + "cam.pre_callback = apply_timestamp\n"
+            lines = lines[:i] + [cb_line] + lines[i:]
+            print("  + cam.pre_callback = apply_timestamp registrován (před cam.start)")
             inserted_callback = True
             changed = True
             break
     if not inserted_callback:
-        print("  ! Callback — kotva 'if not isUsb:' nenalezena, nutná manuální kontrola")
+        print("  ! Callback — kotva 'cam.start(show_preview=False)' nenalezena, nutná manuální kontrola")
 
     if changed:
         path.write_text("".join(lines), encoding="utf-8")
