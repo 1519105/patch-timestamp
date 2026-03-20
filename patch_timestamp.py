@@ -14,7 +14,53 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-TARGET = Path("/home/cam/prg/raspi-cam-srv/raspiCamSrv/camera_pi.py")
+# ── Automatické nalezení camera_pi.py ────────────────────────────────────────
+
+def find_target() -> Path:
+    """
+    Hledá camera_pi.py v tomto pořadí:
+    1. Vedle tohoto skriptu (pokud je přibalený přímo v repo)
+    2. ~/prg/raspi-cam-srv/raspiCamSrv/camera_pi.py (home aktuálního uživatele)
+    3. /home/*/prg/raspi-cam-srv/raspiCamSrv/camera_pi.py (všechny home adresáře)
+    4. Glob **/raspiCamSrv/camera_pi.py po celém /home (pomalý fallback)
+    """
+    rel = Path("prg/raspi-cam-srv/raspiCamSrv/camera_pi.py")
+
+    # 1. Vedle skriptu
+    try:
+        local = Path(__file__).resolve().parent / "camera_pi.py"
+        if local.exists():
+            print(f"  Nalezeno vedle skriptu: {local}")
+            return local
+    except NameError:
+        pass  # __file__ není dostupné při spuštění přes curl | python3
+
+    # 2. Home aktuálního uživatele
+    candidate = Path.home() / rel
+    if candidate.exists():
+        print(f"  Nalezeno v home: {candidate}")
+        return candidate
+
+    # 3. Všechny /home/*/
+    if Path("/home").exists():
+        for h in sorted(Path("/home").iterdir()):
+            if not h.is_dir():
+                continue
+            candidate = h / rel
+            if candidate.exists():
+                print(f"  Nalezeno v /home/{h.name}: {candidate}")
+                return candidate
+
+    # 4. Glob fallback — prohledá celý /home
+    print("  Hledám přes glob (může chvíli trvat)...")
+    results = list(Path("/home").glob("**/raspiCamSrv/camera_pi.py"))
+    if results:
+        print(f"  Nalezeno přes glob: {results[0]}")
+        return results[0]
+
+    return Path("__NENALEZENO__")
+
+TARGET = find_target()
 
 # ── Co přidat ────────────────────────────────────────────────────────────────
 
@@ -175,7 +221,9 @@ def patch(path: Path):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Patch camera_pi.py — přidat časovou značku")
-    parser.add_argument("--path", default=str(TARGET),
-                        help=f"Cesta k camera_pi.py (výchozí: {TARGET})")
+    parser.add_argument("--path", default=None,
+                        help="Cesta k camera_pi.py (výchozí: automatické hledání)")
     args = parser.parse_args()
-    patch(Path(args.path))
+
+    target = Path(args.path) if args.path else TARGET
+    patch(target)
