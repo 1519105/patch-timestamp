@@ -144,13 +144,19 @@ def patch(path: Path, force: bool = False):
         if force:
             print("  --force set, re-applying...")
         else:
+            # When piped via curl | python3, stdin is the pipe itself.
+            # Read directly from /dev/tty to get real terminal input.
             try:
-                answer = input("  Re-apply patch anyway? [y/N]: ").strip().lower()
-            except EOFError:
-                # Non-interactive (e.g. curl | python3) — default to no
+                with open("/dev/tty") as tty:
+                    sys.stdout.write("  Re-apply patch anyway? [y/N]: ")
+                    sys.stdout.flush()
+                    answer = tty.readline().strip().lower()
+            except OSError:
+                # No TTY available (e.g. cron, CI) — default to no
                 answer = "n"
+                print("  No TTY available, defaulting to N. Use --force to override.")
             if answer != "y":
-                print("  Skipping. Run with --force to skip this prompt.")
+                print("  Skipping.")
                 sys.exit(0)
         print("  Re-applying patch...")
 
