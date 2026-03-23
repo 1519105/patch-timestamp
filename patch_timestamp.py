@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-patch_timestamp.py - Adds a live timestamp overlay to camera_pi.py (raspi-cam-srv).
+patch_timestamp.py - Adds a live timestamp overlay to camera_pi.py (raspiCamSrv).
 
 Automatically re-applies after git pull updates overwrite the file.
 
@@ -23,11 +23,11 @@ def find_target() -> Path:
     """
     Searches for camera_pi.py in this order:
     1. Same directory as this script (if placed inside the repo)
-    2. ~/prg/raspi-cam-srv/raspiCamSrv/camera_pi.py (current user home)
-    3. /home/*/prg/raspi-cam-srv/raspiCamSrv/camera_pi.py (all home dirs)
+    2. ~/prg/raspiCamSrv/raspiCamSrv/camera_pi.py (current user home)
+    3. /home/*/prg/raspiCamSrv/raspiCamSrv/camera_pi.py (all home dirs)
     4. Glob fallback across all of /home (slow, last resort)
     """
-    rel = Path("prg/raspi-cam-srv/raspiCamSrv/camera_pi.py")
+    rel = Path("prg/raspiCamSrv/raspiCamSrv/camera_pi.py")
 
     # 1. Next to this script
     try:
@@ -219,7 +219,7 @@ def patch(path: Path, force: bool = False):
     if changed:
         path.write_text("".join(lines), encoding="utf-8")
         print(f"\n  Done. Restart the picamera2 service:")
-        print(f"  sudo systemctl restart raspi-cam-srv")
+        print(f"  sudo systemctl restart raspiCamSrv")
         print(f"  (check name with: systemctl list-units | grep cam)")
     else:
         print("  No changes made.")
