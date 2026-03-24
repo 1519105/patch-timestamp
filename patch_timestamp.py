@@ -4,17 +4,19 @@ patch_timestamp.py - Adds a live timestamp overlay to camera_pi.py (raspiCamSrv)
 
 Automatically re-applies after git pull updates overwrite the file.
 
-Fixes vs previous version:
-  - cv2 constants no longer evaluated at module level (safe when cv2 missing)
-  - apply_timestamp tries "lores" first, falls back to "main" (RPi Zero compat)
-  - guard: returns early if cv2 is not available at callback time
-  - applyControls() no longer silently overwrites pre_callback with None
-    when AI is disabled — timestamp callback is preserved
+What this script does:
+  1. Finds the venv used by raspiCamSrv and checks if opencv is installed.
+     If not, installs opencv-python-headless into that venv automatically.
+  2. Patches camera_pi.py with a safe apply_timestamp() callback:
+     - No module-level cv2 constants (safe when cv2 missing at import time)
+     - Tries "lores" stream first, falls back to "main" (RPi Zero compat)
+     - Guards against cv2 being unavailable at runtime
 
 Usage:
     python3 patch_timestamp.py
     python3 patch_timestamp.py --path /custom/path/to/camera_pi.py
-    python3 patch_timestamp.py --force   # re-apply without prompting
+    python3 patch_timestamp.py --force         # re-apply without prompting
+    python3 patch_timestamp.py --no-cv2-check  # skip opencv install check
 
 One-liner from GitHub:
     curl -sL https://raw.githubusercontent.com/1519105/patch-timestamp/main/patch_timestamp.py | python3
@@ -22,6 +24,7 @@ One-liner from GitHub:
 
 import sys
 import shutil
+import subprocess
 from pathlib import Path
 from datetime import datetime
 
@@ -72,6 +75,89 @@ def find_target() -> Path:
     return Path("__NOT_FOUND__")
 
 TARGET = find_target()
+
+# ── cv2 / opencv detection and install ───────────────────────────────────────
+
+def find_venv_pip(target: Path):
+    """
+    Finds the pip executable of the venv used by raspiCamSrv.
+    Walks up from camera_pi.py's location, then tries common /home paths.
+    Returns a Path to pip, or None if not found.
+    """
+    for parent in [target.parent, target.parent.parent, target.parent.parent.parent]:
+        for venv_name in (".venv", "venv", "env"):
+            pip = parent / venv_name / "bin" / "pip"
+            if pip.exists():
+                return pip
+
+    # Fallback: glob common locations
+    for pattern in [
+        "home/*/prg/raspi-cam-srv/.venv/bin/pip",
+        "home/*/prg/raspiCamSrv/.venv/bin/pip",
+    ]:
+        results = list(Path("/").glob(pattern))
+        if results:
+            return results[0]
+
+    return None
+
+
+def check_and_install_cv2(target: Path, skip: bool = False):
+    """
+    Checks whether cv2 is importable in the raspiCamSrv venv.
+    If missing and skip=False, offers to install opencv-python-headless.
+    """
+    if skip:
+        print("\ncv2 check skipped (--no-cv2-check).")
+        return
+
+    print("\nChecking cv2 (opencv) in raspiCamSrv venv...")
+
+    pip = find_venv_pip(target)
+    if pip is None:
+        print("  ! Could not locate venv pip — skipping.")
+        print("    Install manually: pip install opencv-python-headless")
+        return
+
+    python = pip.parent / "python3"
+    if not python.exists():
+        python = pip.parent / "python"
+
+    # Test import
+    result = subprocess.run(
+        [str(python), "-c", "import cv2"],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        ver = subprocess.run(
+            [str(python), "-c", "import cv2; print(cv2.__version__)"],
+            capture_output=True, text=True,
+        )
+        print(f"  ~ cv2 already available: version {ver.stdout.strip()}")
+        return
+
+    # Not found — ask user (or auto-install when no TTY, e.g. curl | python3)
+    print(f"  ! cv2 not found in venv at: {pip.parent}")
+    try:
+        with open("/dev/tty") as tty:
+            sys.stdout.write("  Install opencv-python-headless now? [Y/n]: ")
+            sys.stdout.flush()
+            answer = tty.readline().strip().lower()
+    except OSError:
+        answer = "y"
+        print("  No TTY detected — installing automatically.")
+
+    if answer in ("", "y"):
+        print("  Installing opencv-python-headless (may take a minute on Zero)...")
+        ret = subprocess.run([str(pip), "install", "opencv-python-headless"])
+        if ret.returncode == 0:
+            print("  + opencv-python-headless installed successfully.")
+        else:
+            print("  ! Installation failed. Try manually:")
+            print(f"    sudo {pip} install opencv-python-headless")
+    else:
+        print("  Skipped. Timestamp overlay will be inactive until cv2 is installed.")
+
 
 # ── Patch content ─────────────────────────────────────────────────────────────
 
@@ -282,6 +368,12 @@ if __name__ == "__main__":
         "--force", action="store_true",
         help="Re-apply patch without prompting even if already patched"
     )
+    parser.add_argument(
+        "--no-cv2-check", action="store_true", dest="no_cv2_check",
+        help="Skip opencv availability check and auto-install"
+    )
     args   = parser.parse_args()
     target = Path(args.path) if args.path else TARGET
+
+    check_and_install_cv2(target, skip=args.no_cv2_check)
     patch(target, force=args.force)
