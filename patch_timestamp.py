@@ -79,17 +79,24 @@ _ts_scale     = 1.0
 _ts_thickness = 3
 
 def apply_timestamp(request):
-    """Pre-callback: burns current time into the lores stream frame."""
+    """Pre-callback: burns current time into the camera stream frame.
+    Tries 'lores' first (RPi 4/5), falls back to 'main' (RPi Zero / USB cameras).
+    """
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    with MappedArray(request, "lores") as m:
-        (text_width, text_height), baseline = cv2.getTextSize(
-            timestamp, _ts_font, _ts_scale, _ts_thickness
-        )
-        bg_start = (_ts_origin[0] - 5, _ts_origin[1] - text_height - 10)
-        bg_end   = (_ts_origin[0] + text_width + 5, _ts_origin[1] + baseline + 5)
-        cv2.rectangle(m.array, bg_start, bg_end, (0, 0, 0), -1)
-        cv2.putText(m.array, timestamp, _ts_origin, _ts_font,
-                    _ts_scale, _ts_color, _ts_thickness, cv2.LINE_AA)
+    for _stream in ("lores", "main"):
+        try:
+            with MappedArray(request, _stream) as m:
+                (text_width, text_height), baseline = cv2.getTextSize(
+                    timestamp, _ts_font, _ts_scale, _ts_thickness
+                )
+                bg_start = (_ts_origin[0] - 5, _ts_origin[1] - text_height - 10)
+                bg_end   = (_ts_origin[0] + text_width + 5, _ts_origin[1] + baseline + 5)
+                cv2.rectangle(m.array, bg_start, bg_end, (0, 0, 0), -1)
+                cv2.putText(m.array, timestamp, _ts_origin, _ts_font,
+                            _ts_scale, _ts_color, _ts_thickness, cv2.LINE_AA)
+            break  # success — don't try the next stream
+        except Exception:
+            continue
 # === END TIMESTAMP OVERLAY ===
 '''
 
